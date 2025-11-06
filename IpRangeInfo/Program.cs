@@ -1,17 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Numerics;
 
 class IpRangeInfo
 {
-    public BigInteger Start;
-    public BigInteger End;
-    public string CountryCode;
-    public string CountryName;
-    public string StateCode;
-    public string StateName;
+    public BigInteger Start { get; set; }
+    public BigInteger End { get; set; }
+    public string CountryCode { get; set; }
+    public string CountryName { get; set; }
+    public string StateCode { get; set; }
+    public string StateName { get; set; }
 }
 
 class Program
@@ -21,72 +22,92 @@ class Program
 
     static void LoadDatabase(string filePath)
     {
-        // Для примера — парсинг CSV
+        if (!File.Exists(filePath))
+        {
+            Console.WriteLine($"Файл не найден: {filePath}");
+            return;
+        }
+
         foreach (var line in File.ReadLines(filePath))
         {
-            var parts = line.Split(','); 
-            var range = new IpRangeInfo
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            var parts = line.Split(';');
+
+            if (parts.Length < 10) continue;
+
+            try
             {
-                Start = ParseIp(parts[0]),
-                End = ParseIp(parts[1]),
-                CountryCode = parts[2],
-                CountryName = parts[3],
-                StateCode = parts[4],
-                StateName = parts[5]
-            };
-            if (parts[0].Contains(":"))
-                ipv6Ranges.Add(range);
-            else
-                ipv4Ranges.Add(range);
+                var cidr = parts[0].Trim();
+                var (startIp, endIp) = ParseCidr(cidr);
+
+                var range = new IpRangeInfo
+                {
+                    Start = startIp,
+                    End = endIp,
+                    CountryCode = parts[3].Trim(),
+                    CountryName = parts[4].Trim(),
+                    StateCode = parts[5].Trim(),
+                    StateName = parts[6].Trim()
+                };
+
+                if (cidr.Contains(":"))
+                    ipv6Ranges.Add(range);
+                else
+                    ipv4Ranges.Add(range);
+
+                // Вывод каждой строки
+                Console.WriteLine($"{cidr} -> {range.CountryCode}, {range.CountryName}, {range.StateCode}, {range.StateName}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Ошибка парсинга строки: {line}. {ex.Message}");
+            }
         }
-        ipv4Ranges.Sort((a, b) => a.Start.CompareTo(b.Start));
-        ipv6Ranges.Sort((a, b) => a.Start.CompareTo(b.Start));
+
+        Console.WriteLine($"\nВсего загружено IPv4 диапазонов: {ipv4Ranges.Count}");
+        Console.WriteLine($"Всего загружено IPv6 диапазонов: {ipv6Ranges.Count}");
+    }
+
+    static (BigInteger start, BigInteger end) ParseCidr(string cidr)
+    {
+        var parts = cidr.Split('/');
+        var ipStr = parts[0];
+        var prefixLen = int.Parse(parts[1]);
+
+        var ip = IPAddress.Parse(ipStr);
+        var isIPv6 = ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
+
+        BigInteger ipNum = ParseIp(ipStr);
+        int totalBits = isIPv6 ? 128 : 32;
+        int hostBits = totalBits - prefixLen;
+
+        BigInteger mask = (BigInteger.One << hostBits) - 1;
+        BigInteger start = ipNum & ~mask;
+        BigInteger end = start | mask;
+
+        return (start, end);
     }
 
     static BigInteger ParseIp(string ip)
     {
-        if (ip.Contains(":"))
-            return new BigInteger(IPAddress.Parse(ip).GetAddressBytes(), isUnsigned: true, isBigEndian: true);
-        else
-            return new BigInteger(IPAddress.Parse(ip).GetAddressBytes().Reverse().ToArray());
-    }
+        var addr = IPAddress.Parse(ip);
+        var bytes = addr.GetAddressBytes();
 
-    static IpRangeInfo FindIpInfo(string ip)
-    {
-        var value = ParseIp(ip);
-        var ranges = ip.Contains(":") ? ipv6Ranges : ipv4Ranges;
-        int left = 0, right = ranges.Count - 1;
-        while (left <= right)
+        if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
         {
-            int mid = (left + right) / 2;
-            if (value < ranges[mid].Start)
-            {
-                right = mid - 1;
-            }
-            else if (value > ranges[mid].End)
-            {
-                left = mid + 1;
-            }
-            else
-            {
-                return ranges[mid];
-            }
+            return new BigInteger(bytes, isUnsigned: true, isBigEndian: true);
         }
-        return null;
+        else
+        {
+            Array.Reverse(bytes);
+            return new BigInteger(bytes);
+        }
     }
 
     static void Main()
     {
-        LoadDatabase("db.csv");
-        string ip = "8.8.8.8";
-        var info = FindIpInfo(ip);
-        if (info != null)
-        {
-            Console.WriteLine($"{info.CountryCode},{info.CountryName},{info.StateCode},{info.StateName}");
-        }
-        else
-        {
-            Console.WriteLine("Not found");
-        }
+        var csvPath = Path.Combine(AppContext.BaseDirectory, "geo-US_utf8.csv");
+        LoadDatabase(csvPath);
     }
 }
