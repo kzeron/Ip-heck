@@ -24,7 +24,7 @@ class Program
         // Для примера — парсинг CSV
         foreach (var line in File.ReadLines(filePath))
         {
-            var parts = line.Split(','); // форматировать под ваш CSV
+            var parts = line.Split(','); 
             var range = new IpRangeInfo
             {
                 Start = ParseIp(parts[0]),
